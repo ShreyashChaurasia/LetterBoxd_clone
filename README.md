@@ -9,7 +9,7 @@ This repository contains:
 - ER design reference in `ER_Diagram.md`
 - MySQL relational schema scripts
 - sample seed data
-- 10 SQL test queries for validation/demo
+- 60 SQL test queries for validation/demo and practice
 
 The data model supports:
 
@@ -62,7 +62,7 @@ mysql -u <username> -p <database_name> < database/mysql/test_queries.sql
 
 ## Test Queries Included
 
-`database/mysql/test_queries.sql` includes 10 verification queries that cover:
+`database/mysql/test_queries.sql` now includes 60 queries (`Q1` to `Q60`) covering:
 
 1. user activity summary (ratings + reviews)
 2. top-rated movies
@@ -74,9 +74,15 @@ mysql -u <username> -p <database_name> < database/mysql/test_queries.sql
 8. director film counts
 9. actor filmography
 10. recommendation-style query based on favorite genre
+11. aggregation and leaderboard queries
+12. list/watchlist/diary analytics
+13. genre/director/actor insights
+14. window functions and ranking
+15. recommendation-style and user similarity patterns
+16. data quality and keyword search queries
 
 ## Notes
 
 - Schema includes primary keys, foreign keys, unique constraints, check constraints, and performance indexes.
 - Sample data is intentionally small and readable for viva/demo usage.
-- Requires MySQL 8.0+ (CTE/window function support in query 10).
+- Requires MySQL 8.0+ (CTE/window function support in multiple queries, including `Q10` and `Q31+`).
