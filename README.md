@@ -9,7 +9,7 @@ This repository contains:
 - ER design reference in `ER_Diagram.md`
 - MySQL relational schema scripts
 - sample seed data
-- 60 SQL test queries for validation/demo and practice
+- 70 SQL test queries for validation/demo and practice
 
 The data model supports:
 
@@ -62,7 +62,7 @@ mysql -u <username> -p <database_name> < database/mysql/test_queries.sql
 
 ## Test Queries Included
 
-`database/mysql/test_queries.sql` now includes 60 queries (`Q1` to `Q60`) covering:
+`database/mysql/test_queries.sql` now includes 70 queries (`Q1` to `Q70`) covering:
 
 1. user activity summary (ratings + reviews)
 2. top-rated movies

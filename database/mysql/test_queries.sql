@@ -1,4 +1,4 @@
--- 60 test queries for Letterboxd Clone database (MySQL)
+-- 70 test queries for Letterboxd Clone database (MySQL)
 
 -- Q1: List all users with total ratings and reviews they have written.
 SELECT
@@ -103,7 +103,7 @@ JOIN movies m ON m.movie_id = ma.movie_id
 ORDER BY a.actor_name, m.release_year DESC;
 
 -- Q10: "Recommendation-style" query:
--- movies in user's favorite genre not yet rated by that user (example user: shrey).
+-- movies in user's favorite genre not yet rated by that user (example user: Shreyash).
 WITH genre_counts AS (
     SELECT
         r.user_id,
@@ -111,7 +111,7 @@ WITH genre_counts AS (
         COUNT(*) AS genre_rating_count
     FROM ratings r
     JOIN movie_genres mg ON mg.movie_id = r.movie_id
-    WHERE r.user_id = (SELECT user_id FROM users WHERE username = 'shrey')
+    WHERE r.user_id = (SELECT user_id FROM users WHERE username = 'Shreyash')
     GROUP BY r.user_id, mg.genre_id
 ),
 user_fav_genre AS (
@@ -501,11 +501,11 @@ JOIN users u2 ON u2.user_id = r2.user_id
 GROUP BY u1.username, u2.username
 ORDER BY avg_abs_diff, common_movies DESC, user_a, user_b;
 
--- Q40: Simple collaborative suggestions for user 'shrey'.
+-- Q40: Simple collaborative suggestions for user 'Shreyash'.
 WITH target_user AS (
     SELECT user_id
     FROM users
-    WHERE username = 'shrey'
+    WHERE username = 'Shreyash'
 ),
 similar_users AS (
     SELECT
@@ -877,3 +877,248 @@ JOIN favorite_genre fg
     AND fg.rn = 1
 JOIN genres g ON g.genre_id = fg.genre_id
 ORDER BY u.username, c.community_avg DESC, c.title;
+
+-- Q61: Weighted movie ranking (balances avg rating and vote count).
+WITH movie_stats AS (
+    SELECT
+        m.movie_id,
+        m.title,
+        AVG(r.rating_value) AS avg_rating,
+        COUNT(r.rating_id) AS rating_count
+    FROM movies m
+    JOIN ratings r ON r.movie_id = m.movie_id
+    GROUP BY m.movie_id, m.title
+),
+global_stats AS (
+    SELECT
+        AVG(rating_value) AS global_avg,
+        3 AS min_votes_weight
+    FROM ratings
+)
+SELECT
+    ms.title,
+    ROUND(ms.avg_rating, 2) AS avg_rating,
+    ms.rating_count,
+    ROUND(
+        (
+            (ms.rating_count / (ms.rating_count + gs.min_votes_weight)) * ms.avg_rating
+        ) + (
+            (gs.min_votes_weight / (ms.rating_count + gs.min_votes_weight)) * gs.global_avg
+        ),
+        3
+    ) AS weighted_score
+FROM movie_stats ms
+CROSS JOIN global_stats gs
+ORDER BY weighted_score DESC, ms.rating_count DESC, ms.title;
+
+-- Q62: Review coverage per user (reviewed movies out of rated movies).
+SELECT
+    u.username,
+    COUNT(DISTINCT r.movie_id) AS rated_movies,
+    COUNT(DISTINCT rv.movie_id) AS reviewed_movies,
+    ROUND(
+        100.0 * COUNT(DISTINCT rv.movie_id) / NULLIF(COUNT(DISTINCT r.movie_id), 0),
+        2
+    ) AS review_coverage_pct
+FROM users u
+LEFT JOIN ratings r ON r.user_id = u.user_id
+LEFT JOIN reviews rv ON rv.user_id = u.user_id
+GROUP BY u.user_id, u.username
+ORDER BY review_coverage_pct DESC, rated_movies DESC, u.username;
+
+-- Q63: Movie engagement score across watchlist, lists, and diary logs.
+SELECT
+    m.title,
+    COUNT(DISTINCT w.watchlist_id) AS watchlist_adds,
+    COUNT(DISTINCT lm.list_movie_id) AS list_appearances,
+    COUNT(DISTINCT d.diary_id) AS diary_logs,
+    (
+        COUNT(DISTINCT w.watchlist_id)
+        + COUNT(DISTINCT lm.list_movie_id)
+        + COUNT(DISTINCT d.diary_id)
+    ) AS engagement_score
+FROM movies m
+LEFT JOIN watchlist_entries w ON w.movie_id = m.movie_id
+LEFT JOIN list_movies lm ON lm.movie_id = m.movie_id
+LEFT JOIN diary_entries d ON d.movie_id = m.movie_id
+GROUP BY m.movie_id, m.title
+HAVING engagement_score > 0
+ORDER BY engagement_score DESC, m.title;
+
+-- Q64: Most active users in the latest 14-day activity window.
+WITH all_events AS (
+    SELECT user_id, DATE(rated_at) AS event_date FROM ratings
+    UNION ALL
+    SELECT user_id, review_date AS event_date FROM reviews
+    UNION ALL
+    SELECT user_id, watch_date AS event_date FROM diary_entries
+),
+anchor AS (
+    SELECT MAX(event_date) AS latest_date
+    FROM all_events
+)
+SELECT
+    u.username,
+    COUNT(*) AS events_last_14_days,
+    MIN(ae.event_date) AS first_event_in_window,
+    MAX(ae.event_date) AS last_event_in_window
+FROM all_events ae
+JOIN anchor a
+    ON ae.event_date BETWEEN DATE_SUB(a.latest_date, INTERVAL 13 DAY) AND a.latest_date
+JOIN users u ON u.user_id = ae.user_id
+GROUP BY u.user_id, u.username
+ORDER BY events_last_14_days DESC, u.username;
+
+-- Q65: Favorite decade per user (minimum 2 ratings in that decade).
+WITH user_decade_stats AS (
+    SELECT
+        r.user_id,
+        FLOOR(m.release_year / 10) * 10 AS decade_start,
+        AVG(r.rating_value) AS avg_rating,
+        COUNT(*) AS rating_count
+    FROM ratings r
+    JOIN movies m ON m.movie_id = r.movie_id
+    GROUP BY r.user_id, FLOOR(m.release_year / 10) * 10
+    HAVING COUNT(*) >= 2
+),
+ranked_decades AS (
+    SELECT
+        uds.user_id,
+        uds.decade_start,
+        uds.avg_rating,
+        uds.rating_count,
+        ROW_NUMBER() OVER (
+            PARTITION BY uds.user_id
+            ORDER BY uds.avg_rating DESC, uds.rating_count DESC, uds.decade_start DESC
+        ) AS rn
+    FROM user_decade_stats uds
+)
+SELECT
+    u.username,
+    CONCAT(rd.decade_start, 's') AS favorite_decade,
+    ROUND(rd.avg_rating, 2) AS avg_rating,
+    rd.rating_count
+FROM ranked_decades rd
+JOIN users u ON u.user_id = rd.user_id
+WHERE rd.rn = 1
+ORDER BY u.username;
+
+-- Q66: Movies that have both spoiler and non-spoiler reviews.
+SELECT
+    m.title,
+    SUM(rv.contains_spoiler = 1) AS spoiler_reviews,
+    SUM(rv.contains_spoiler = 0) AS non_spoiler_reviews
+FROM movies m
+JOIN reviews rv ON rv.movie_id = m.movie_id
+GROUP BY m.movie_id, m.title
+HAVING SUM(rv.contains_spoiler = 1) > 0
+AND SUM(rv.contains_spoiler = 0) > 0
+ORDER BY spoiler_reviews DESC, non_spoiler_reviews DESC, m.title;
+
+-- Q67: Users who rated every movie in a target genre (example: Thriller).
+WITH target_genre_movies AS (
+    SELECT DISTINCT mg.movie_id
+    FROM movie_genres mg
+    JOIN genres g ON g.genre_id = mg.genre_id
+    WHERE g.genre_name = 'Thriller'
+),
+user_target_counts AS (
+    SELECT
+        r.user_id,
+        COUNT(DISTINCT r.movie_id) AS rated_target_movies
+    FROM ratings r
+    JOIN target_genre_movies tgm ON tgm.movie_id = r.movie_id
+    GROUP BY r.user_id
+)
+SELECT
+    u.username,
+    utc.rated_target_movies,
+    (SELECT COUNT(*) FROM target_genre_movies) AS total_target_movies
+FROM user_target_counts utc
+JOIN users u ON u.user_id = utc.user_id
+WHERE utc.rated_target_movies = (SELECT COUNT(*) FROM target_genre_movies)
+ORDER BY u.username;
+
+-- Q68: Highly similar user pairs by rating difference (min 2 common movies).
+SELECT
+    u1.username AS user_a,
+    u2.username AS user_b,
+    COUNT(*) AS common_movies,
+    ROUND(AVG(ABS(r1.rating_value - r2.rating_value)), 2) AS avg_abs_diff
+FROM ratings r1
+JOIN ratings r2
+    ON r1.movie_id = r2.movie_id
+    AND r1.user_id < r2.user_id
+JOIN users u1 ON u1.user_id = r1.user_id
+JOIN users u2 ON u2.user_id = r2.user_id
+GROUP BY u1.username, u2.username
+HAVING COUNT(*) >= 2
+AND AVG(ABS(r1.rating_value - r2.rating_value)) <= 0.75
+ORDER BY avg_abs_diff, common_movies DESC, user_a, user_b;
+
+-- Q69: Longest consecutive-day diary streak per user.
+WITH distinct_days AS (
+    SELECT DISTINCT
+        d.user_id,
+        d.watch_date
+    FROM diary_entries d
+),
+grouped_days AS (
+    SELECT
+        dd.user_id,
+        dd.watch_date,
+        DATE_SUB(
+            dd.watch_date,
+            INTERVAL ROW_NUMBER() OVER (
+                PARTITION BY dd.user_id
+                ORDER BY dd.watch_date
+            ) DAY
+        ) AS streak_group
+    FROM distinct_days dd
+),
+streaks AS (
+    SELECT
+        gd.user_id,
+        MIN(gd.watch_date) AS streak_start,
+        MAX(gd.watch_date) AS streak_end,
+        COUNT(*) AS streak_length_days
+    FROM grouped_days gd
+    GROUP BY gd.user_id, gd.streak_group
+),
+ranked_streaks AS (
+    SELECT
+        s.*,
+        ROW_NUMBER() OVER (
+            PARTITION BY s.user_id
+            ORDER BY s.streak_length_days DESC, s.streak_end DESC
+        ) AS rn
+    FROM streaks s
+)
+SELECT
+    u.username,
+    rs.streak_start,
+    rs.streak_end,
+    rs.streak_length_days
+FROM ranked_streaks rs
+JOIN users u ON u.user_id = rs.user_id
+WHERE rs.rn = 1
+ORDER BY rs.streak_length_days DESC, u.username;
+
+-- Q70: Unwatched watchlist items ranked by community rating.
+SELECT
+    u.username,
+    m.title,
+    w.added_date,
+    ROUND(AVG(r.rating_value), 2) AS community_avg_rating,
+    COUNT(r.rating_id) AS community_rating_count
+FROM watchlist_entries w
+JOIN users u ON u.user_id = w.user_id
+JOIN movies m ON m.movie_id = w.movie_id
+LEFT JOIN ratings r ON r.movie_id = w.movie_id
+LEFT JOIN diary_entries d
+    ON d.user_id = w.user_id
+    AND d.movie_id = w.movie_id
+WHERE d.diary_id IS NULL
+GROUP BY u.user_id, u.username, m.movie_id, m.title, w.added_date
+HAVING community_rating_count >= 1
+ORDER BY u.username, community_avg_rating DESC, w.added_date;
